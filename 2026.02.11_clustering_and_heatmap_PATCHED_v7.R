@@ -1084,26 +1084,13 @@ save_heatmaps <- function(run_params) {
     2L
   }
 
-  # helper: build a high-contrast qualitative palette for cluster colouring.
-  # If k is large, the palette is recycled (intentionally) to keep colours vivid.
+  # helper: build a wide palette for cluster colouring without recycling.
+  # We generate exactly k colours so each cluster gets its own branch colour.
   make_cluster_cols <- function(k) {
-    base <- c(
-      "#d73027", # red
-      "#4575b4", # blue
-      "#1a9850", # green
-      "#984ea3", # purple
-      "#ff7f00", # orange
-      "#e7298a", # magenta
-      "#66a61e", # olive
-      "#e6ab02", # mustard
-      "#a6761d", # brown
-      "#1b9e77", # teal
-      "#7570b3", # indigo
-      "#e41a1c", # bright red
-      "#377eb8", # bright blue
-      "#4daf4a"  # bright green
-    )
-    rep(base, length.out = k)
+    if (k <= 0L) return(character(0))
+    cols <- grDevices::hcl.colors(k, palette = "Dark 3", alpha = 1)
+    names(cols) <- as.character(seq_len(k))
+    cols
   }
 
 # helper: colour dendrogram edges so that parent branches inherit a child colour
@@ -1127,7 +1114,11 @@ color_cluster_leaf_branches <- function(hc_obj, k, lwd_col = 2.0, lwd_grey = 1.0
       leaf_pos <<- leaf_pos + 1L
       obs_idx <- hc_obj$order[leaf_pos]
       cid <- cl[obs_idx]
-      col_here <- cols[cid]
+      if (is.na(cid) || cid < 1L || cid > length(cols)) {
+        col_here <- "grey80"
+      } else {
+        col_here <- cols[[as.character(cid)]]
+      }
 
       ep$col <- col_here
       ep$lwd <- lwd_col
