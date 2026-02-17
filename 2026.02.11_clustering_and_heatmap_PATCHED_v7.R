@@ -1109,44 +1109,50 @@ save_heatmaps <- function(run_params) {
 # helper: colour dendrogram edges so that parent branches inherit a child colour
 # only when *all* descendants are in the same cutree cluster. Mixed children -> grey80.
 #
-# We traverse the dendrogram bottom-up and propagate a single branch colour upwards.
-# This guarantees consistency for all parent branches in PA and quantitative heatmaps.
+# IMPORTANT: cluster colours may be intentionally recycled when k is large.
+# Therefore, branch inheritance must propagate *cluster ids* upward, not colours.
+# Otherwise two different clusters that share a recycled colour could incorrectly
+# make mixed parent branches look "uniform" instead of grey.
 color_cluster_leaf_branches <- function(hc_obj, k, lwd_col = 2.0, lwd_grey = 1.0) {
   cols <- make_cluster_cols(k)
-  cl <- as.integer(stats::cutree(hc_obj, k = k))
+  cl <- stats::cutree(hc_obj, k = k)
   dend <- as.dendrogram(hc_obj)
-
-  # leaves are encountered in hc_obj$order when traversing the dendrogram left-to-right
-  leaf_pos <- 0L
 
   recolour_node <- function(node) {
     ep <- attr(node, "edgePar")
     if (is.null(ep)) ep <- list()
 
     if (stats::is.leaf(node)) {
-      leaf_pos <<- leaf_pos + 1L
-      obs_idx <- hc_obj$order[leaf_pos]
-      cid <- cl[obs_idx]
+      lab <- as.character(attr(node, "label"))
+      cid <- as.integer(cl[[lab]])
+      if (is.na(cid)) stop("Leaf label not found in cutree membership vector.")
       col_here <- cols[cid]
 
       ep$col <- col_here
       ep$lwd <- lwd_col
       attr(node, "edgePar") <- ep
-      return(list(node = node, col = col_here))
+      return(list(node = node, cluster_id = cid))
     }
 
     child_out <- lapply(node, recolour_node)
     for (i in seq_along(node)) node[[i]] <- child_out[[i]]$node
 
-    child_cols <- vapply(child_out, function(x) x$col, character(1))
-    uniq_child <- unique(child_cols)
+    child_ids <- vapply(child_out, function(x) x$cluster_id, integer(1))
+    uniq_child <- unique(child_ids)
 
-    col_here <- if (length(uniq_child) == 1L) uniq_child else "grey80"
+    if (length(uniq_child) == 1L) {
+      cid_here <- uniq_child
+      col_here <- cols[cid_here]
+    } else {
+      cid_here <- NA_integer_
+      col_here <- "grey80"
+    }
+
     ep$col <- col_here
     ep$lwd <- if (identical(col_here, "grey80")) lwd_grey else lwd_col
     attr(node, "edgePar") <- ep
 
-    list(node = node, col = col_here)
+    list(node = node, cluster_id = cid_here)
   }
 
   recolour_node(dend)$node
@@ -1372,4 +1378,3 @@ for (r in CFG$runs$heatmap) {
 }
 
 results
-
