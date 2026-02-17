@@ -1084,26 +1084,12 @@ save_heatmaps <- function(run_params) {
     2L
   }
 
-  # helper: build a high-contrast qualitative palette for cluster colouring.
-  # If k is large, the palette is recycled (intentionally) to keep colours vivid.
+  # helper: build a single wide qualitative palette for cluster colouring.
+  # IMPORTANT: do not recycle colours (recycling previously caused branch-colour artefacts).
   make_cluster_cols <- function(k) {
-    base <- c(
-      "#d73027", # red
-      "#4575b4", # blue
-      "#1a9850", # green
-      "#984ea3", # purple
-      "#ff7f00", # orange
-      "#e7298a", # magenta
-      "#66a61e", # olive
-      "#e6ab02", # mustard
-      "#a6761d", # brown
-      "#1b9e77", # teal
-      "#7570b3", # indigo
-      "#e41a1c", # bright red
-      "#377eb8", # bright blue
-      "#4daf4a"  # bright green
-    )
-    rep(base, length.out = k)
+    k <- as.integer(k)
+    if (is.na(k) || k < 1L) return(character(0))
+    grDevices::hcl.colors(k, palette = "Dark 3")
   }
 
 # helper: colour dendrogram edges so that parent branches inherit a child colour
@@ -1114,19 +1100,21 @@ save_heatmaps <- function(run_params) {
 color_cluster_leaf_branches <- function(hc_obj, k, lwd_col = 2.0, lwd_grey = 1.0) {
   cols <- make_cluster_cols(k)
   cl <- as.integer(stats::cutree(hc_obj, k = k))
-  dend <- as.dendrogram(hc_obj)
+  leaf_labels <- hc_obj$labels
+  if (length(leaf_labels) == length(cl)) names(cl) <- leaf_labels
 
-  # leaves are encountered in hc_obj$order when traversing the dendrogram left-to-right
-  leaf_pos <- 0L
+  dend <- as.dendrogram(hc_obj)
 
   recolour_node <- function(node) {
     ep <- attr(node, "edgePar")
     if (is.null(ep)) ep <- list()
 
     if (stats::is.leaf(node)) {
-      leaf_pos <<- leaf_pos + 1L
-      obs_idx <- hc_obj$order[leaf_pos]
-      cid <- cl[obs_idx]
+      lbl <- as.character(attr(node, "label"))
+      cid <- unname(cl[[lbl]])
+      if (is.null(cid) || is.na(cid)) {
+        stop(sprintf("Unable to resolve cluster id for dendrogram leaf '%s'.", lbl))
+      }
       col_here <- cols[cid]
 
       ep$col <- col_here
@@ -1372,4 +1360,3 @@ for (r in CFG$runs$heatmap) {
 }
 
 results
-
