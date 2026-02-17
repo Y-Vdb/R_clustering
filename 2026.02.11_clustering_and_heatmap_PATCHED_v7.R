@@ -1114,6 +1114,7 @@ save_heatmaps <- function(run_params) {
 # issues when labels are duplicated or modified in the PA pipeline.
 color_cluster_leaf_branches <- function(hc_obj, k, lwd_col = 2.0, lwd_grey = 1.0) {
   cols <- make_cluster_cols(k)
+  mixed_col <- "grey80"
 
   # cluster memberships in hclust label order
   cl <- as.integer(stats::cutree(hc_obj, k = k))
@@ -1136,33 +1137,33 @@ color_cluster_leaf_branches <- function(hc_obj, k, lwd_col = 2.0, lwd_grey = 1.0
         ep$col <- cols[cid]
         ep$lwd <- lwd_col
       } else {
-        ep$col <- "grey80"
+        ep$col <- mixed_col
         ep$lwd <- lwd_grey
       }
       attr(node, "edgePar") <- ep
-      return(node)
+      return(list(node = node, col = ep$col))
     }
 
-    labs <- labels(node)
-    ii <- unname(idx_map[labs])
-    ii <- ii[!is.na(ii)]
-    cids <- cl[ii]
+    child_cols <- character(length(node))
+    for (i in seq_along(node)) {
+      child <- recolour_node(node[[i]])
+      node[[i]] <- child$node
+      child_cols[i] <- child$col
+    }
 
-    if (length(cids) > 0 && length(unique(cids)) == 1L) {
-      cid <- unique(cids)
-      ep$col <- cols[cid]
+    if (length(child_cols) > 0 && length(unique(child_cols)) == 1L && !identical(child_cols[1], mixed_col)) {
+      ep$col <- child_cols[1]
       ep$lwd <- lwd_col
     } else {
-      ep$col <- "grey80"
+      ep$col <- mixed_col
       ep$lwd <- lwd_grey
     }
-    attr(node, "edgePar") <- ep
 
-    for (i in seq_along(node)) node[[i]] <- recolour_node(node[[i]])
-    node
+    attr(node, "edgePar") <- ep
+    list(node = node, col = ep$col)
   }
 
-  recolour_node(dend)
+  recolour_node(dend)$node
 }
 
   # metadata for locality annotations (match clustering behaviour)
@@ -1385,4 +1386,3 @@ for (r in CFG$runs$heatmap) {
 }
 
 results
-
