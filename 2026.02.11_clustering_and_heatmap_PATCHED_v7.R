@@ -1106,63 +1106,50 @@ save_heatmaps <- function(run_params) {
     rep(base, length.out = k)
   }
 
-# helper: colour dendrogram edges so that *every* branch whose subtree contains only
-# members of the same cutree cluster gets that cluster colour; all other branches grey80.
-# This guarantees singleton leaves are coloured (their terminal edge is a homogeneous subtree).
+# helper: colour dendrogram edges so that parent branches inherit a child colour
+# only when *all* descendants are in the same cutree cluster. Mixed children -> grey80.
 #
-# NOTE: Uses an index map based on hc_obj$labels (rather than name matching) to avoid
-# issues when labels are duplicated or modified in the PA pipeline.
+# We traverse the dendrogram bottom-up and propagate a single branch colour upwards.
+# This guarantees consistency for all parent branches in PA and quantitative heatmaps.
 color_cluster_leaf_branches <- function(hc_obj, k, lwd_col = 2.0, lwd_grey = 1.0) {
   cols <- make_cluster_cols(k)
-
-  # cluster memberships in hclust label order
   cl <- as.integer(stats::cutree(hc_obj, k = k))
-  labs_hc <- hc_obj$labels
-
-  # map label -> index (requires labels to be unique; we enforce this upstream via make.unique)
-  idx_map <- setNames(seq_along(labs_hc), labs_hc)
-
   dend <- as.dendrogram(hc_obj)
+
+  # leaves are encountered in hc_obj$order when traversing the dendrogram left-to-right
+  leaf_pos <- 0L
 
   recolour_node <- function(node) {
     ep <- attr(node, "edgePar")
     if (is.null(ep)) ep <- list()
 
     if (stats::is.leaf(node)) {
-      lab <- attr(node, "label")
-      ii <- idx_map[[lab]]
-      if (!is.null(ii) && !is.na(ii)) {
-        cid <- cl[ii]
-        ep$col <- cols[cid]
-        ep$lwd <- lwd_col
-      } else {
-        ep$col <- "grey80"
-        ep$lwd <- lwd_grey
-      }
-      attr(node, "edgePar") <- ep
-      return(node)
-    }
+      leaf_pos <<- leaf_pos + 1L
+      obs_idx <- hc_obj$order[leaf_pos]
+      cid <- cl[obs_idx]
+      col_here <- cols[cid]
 
-    labs <- labels(node)
-    ii <- unname(idx_map[labs])
-    ii <- ii[!is.na(ii)]
-    cids <- cl[ii]
-
-    if (length(cids) > 0 && length(unique(cids)) == 1L) {
-      cid <- unique(cids)
-      ep$col <- cols[cid]
+      ep$col <- col_here
       ep$lwd <- lwd_col
-    } else {
-      ep$col <- "grey80"
-      ep$lwd <- lwd_grey
+      attr(node, "edgePar") <- ep
+      return(list(node = node, col = col_here))
     }
+
+    child_out <- lapply(node, recolour_node)
+    for (i in seq_along(node)) node[[i]] <- child_out[[i]]$node
+
+    child_cols <- vapply(child_out, function(x) x$col, character(1))
+    uniq_child <- unique(child_cols)
+
+    col_here <- if (length(uniq_child) == 1L) uniq_child else "grey80"
+    ep$col <- col_here
+    ep$lwd <- if (identical(col_here, "grey80")) lwd_grey else lwd_col
     attr(node, "edgePar") <- ep
 
-    for (i in seq_along(node)) node[[i]] <- recolour_node(node[[i]])
-    node
+    list(node = node, col = col_here)
   }
 
-  recolour_node(dend)
+  recolour_node(dend)$node
 }
 
   # metadata for locality annotations (match clustering behaviour)
