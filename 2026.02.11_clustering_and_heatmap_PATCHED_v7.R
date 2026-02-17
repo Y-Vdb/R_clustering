@@ -1132,21 +1132,23 @@ color_cluster_leaf_branches <- function(hc_obj, k, lwd_col = 2.0, lwd_grey = 1.0
       ep$col <- col_here
       ep$lwd <- lwd_col
       attr(node, "edgePar") <- ep
-      return(list(node = node, col = col_here))
+      return(list(node = node, col = col_here, cid = cid))
     }
 
     child_out <- lapply(node, recolour_node)
     for (i in seq_along(node)) node[[i]] <- child_out[[i]]$node
 
-    child_cols <- vapply(child_out, function(x) x$col, character(1))
-    uniq_child <- unique(child_cols)
+    child_cids <- vapply(child_out, function(x) x$cid, numeric(1))
+    uniq_cids <- unique(child_cids)
 
-    col_here <- if (length(uniq_child) == 1L) uniq_child else "grey80"
+    is_uniform_cluster <- length(uniq_cids) == 1L && !is.na(uniq_cids)
+    cid_here <- if (is_uniform_cluster) uniq_cids else NA_real_
+    col_here <- if (is_uniform_cluster) cols[as.integer(cid_here)] else "grey80"
     ep$col <- col_here
     ep$lwd <- if (identical(col_here, "grey80")) lwd_grey else lwd_col
     attr(node, "edgePar") <- ep
 
-    list(node = node, col = col_here)
+    list(node = node, col = col_here, cid = cid_here)
   }
 
   recolour_node(dend)$node
@@ -1372,4 +1374,3 @@ for (r in CFG$runs$heatmap) {
 }
 
 results
-
