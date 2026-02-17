@@ -1135,34 +1135,40 @@ color_cluster_leaf_branches <- function(hc_obj, k, lwd_col = 2.0, lwd_grey = 1.0
         cid <- cl[ii]
         ep$col <- cols[cid]
         ep$lwd <- lwd_col
+        attr(node, "edgePar") <- ep
+        return(list(node = node, cid = cid))
       } else {
         ep$col <- "grey80"
         ep$lwd <- lwd_grey
+        attr(node, "edgePar") <- ep
+        return(list(node = node, cid = NA_integer_))
       }
-      attr(node, "edgePar") <- ep
-      return(node)
     }
 
-    labs <- labels(node)
-    ii <- unname(idx_map[labs])
-    ii <- ii[!is.na(ii)]
-    cids <- cl[ii]
+    child_info <- vector("list", length(node))
+    for (i in seq_along(node)) {
+      child_info[[i]] <- recolour_node(node[[i]])
+      node[[i]] <- child_info[[i]]$node
+    }
 
-    if (length(cids) > 0 && length(unique(cids)) == 1L) {
-      cid <- unique(cids)
+    child_cids <- unlist(lapply(child_info, `[[`, "cid"), use.names = FALSE)
+    child_cids <- child_cids[!is.na(child_cids)]
+
+    if (length(child_cids) > 0 && length(unique(child_cids)) == 1L) {
+      cid <- unique(child_cids)
       ep$col <- cols[cid]
       ep$lwd <- lwd_col
     } else {
+      cid <- NA_integer_
       ep$col <- "grey80"
       ep$lwd <- lwd_grey
     }
     attr(node, "edgePar") <- ep
 
-    for (i in seq_along(node)) node[[i]] <- recolour_node(node[[i]])
-    node
+    list(node = node, cid = cid)
   }
 
-  recolour_node(dend)
+  recolour_node(dend)$node
 }
 
   # metadata for locality annotations (match clustering behaviour)
@@ -1385,4 +1391,3 @@ for (r in CFG$runs$heatmap) {
 }
 
 results
-
