@@ -1084,26 +1084,11 @@ save_heatmaps <- function(run_params) {
     2L
   }
 
-  # helper: build a high-contrast qualitative palette for cluster colouring.
-  # If k is large, the palette is recycled (intentionally) to keep colours vivid.
+  # helper: build a wide, non-recycled qualitative palette for cluster colouring.
+  # Using one long palette avoids colour recycling artefacts in dense dendrograms.
   make_cluster_cols <- function(k) {
-    base <- c(
-      "#d73027", # red
-      "#4575b4", # blue
-      "#1a9850", # green
-      "#984ea3", # purple
-      "#ff7f00", # orange
-      "#e7298a", # magenta
-      "#66a61e", # olive
-      "#e6ab02", # mustard
-      "#a6761d", # brown
-      "#1b9e77", # teal
-      "#7570b3", # indigo
-      "#e41a1c", # bright red
-      "#377eb8", # bright blue
-      "#4daf4a"  # bright green
-    )
-    rep(base, length.out = k)
+    if (k <= 0L) return(character(0))
+    grDevices::hcl.colors(k, palette = "Dark 3")
   }
 
 # helper: colour dendrogram edges so that parent branches inherit a child colour
@@ -1372,4 +1357,3 @@ for (r in CFG$runs$heatmap) {
 }
 
 results
-
