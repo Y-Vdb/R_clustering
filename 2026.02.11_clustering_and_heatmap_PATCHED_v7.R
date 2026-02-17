@@ -1084,26 +1084,13 @@ save_heatmaps <- function(run_params) {
     2L
   }
 
-  # helper: build a high-contrast qualitative palette for cluster colouring.
-  # If k is large, the palette is recycled (intentionally) to keep colours vivid.
+  # helper: build a wide qualitative palette for cluster colouring.
+  # IMPORTANT: no recycling. We request exactly k colours to avoid colour aliasing bugs
+  # in large dendrograms (especially taxa presence/absence trees).
   make_cluster_cols <- function(k) {
-    base <- c(
-      "#d73027", # red
-      "#4575b4", # blue
-      "#1a9850", # green
-      "#984ea3", # purple
-      "#ff7f00", # orange
-      "#e7298a", # magenta
-      "#66a61e", # olive
-      "#e6ab02", # mustard
-      "#a6761d", # brown
-      "#1b9e77", # teal
-      "#7570b3", # indigo
-      "#e41a1c", # bright red
-      "#377eb8", # bright blue
-      "#4daf4a"  # bright green
-    )
-    rep(base, length.out = k)
+    k <- as.integer(k)
+    if (is.na(k) || k < 1L) stop("k must be a positive integer.")
+    grDevices::hcl.colors(n = k, palette = "Dark 3", alpha = 1)
   }
 
 # helper: colour dendrogram edges so that parent branches inherit a child colour
@@ -1138,7 +1125,9 @@ color_cluster_leaf_branches <- function(hc_obj, k, lwd_col = 2.0, lwd_grey = 1.0
     child_out <- lapply(node, recolour_node)
     for (i in seq_along(node)) node[[i]] <- child_out[[i]]$node
 
-    child_cols <- vapply(child_out, function(x) x$col, character(1))
+    child_cols <- vapply(child_out, function(x) {
+      if (is.null(x$col) || is.na(x$col)) "grey80" else x$col
+    }, character(1))
     uniq_child <- unique(child_cols)
 
     col_here <- if (length(uniq_child) == 1L) uniq_child else "grey80"
