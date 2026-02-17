@@ -1109,8 +1109,9 @@ save_heatmaps <- function(run_params) {
 # helper: colour dendrogram edges so that parent branches inherit a child colour
 # only when *all* descendants are in the same cutree cluster. Mixed children -> grey80.
 #
-# We traverse the dendrogram bottom-up and propagate a single branch colour upwards.
-# This guarantees consistency for all parent branches in PA and quantitative heatmaps.
+# IMPORTANT: cluster colours may be intentionally recycled for large k. Because of that,
+# parent branch decisions MUST be based on cluster ids (not colours), otherwise two
+# different clusters that share a recycled colour would be incorrectly merged visually.
 color_cluster_leaf_branches <- function(hc_obj, k, lwd_col = 2.0, lwd_grey = 1.0) {
   cols <- make_cluster_cols(k)
   cl <- as.integer(stats::cutree(hc_obj, k = k))
@@ -1132,21 +1133,30 @@ color_cluster_leaf_branches <- function(hc_obj, k, lwd_col = 2.0, lwd_grey = 1.0
       ep$col <- col_here
       ep$lwd <- lwd_col
       attr(node, "edgePar") <- ep
-      return(list(node = node, col = col_here))
+      return(list(node = node, col = col_here, cid = cid))
     }
 
     child_out <- lapply(node, recolour_node)
     for (i in seq_along(node)) node[[i]] <- child_out[[i]]$node
 
-    child_cols <- vapply(child_out, function(x) x$col, character(1))
-    uniq_child <- unique(child_cols)
+    child_cids <- vapply(child_out, function(x) x$cid, integer(1))
+    uniq_cids <- unique(child_cids)
 
-    col_here <- if (length(uniq_child) == 1L) uniq_child else "grey80"
+    # Parent branch is coloured only when every descendant belongs to one cluster id.
+    # If multiple cluster ids occur (even if they share a recycled colour), use grey.
+    if (length(uniq_cids) == 1L) {
+      cid_here <- uniq_cids[[1]]
+      col_here <- cols[cid_here]
+    } else {
+      cid_here <- 0L
+      col_here <- "grey80"
+    }
+
     ep$col <- col_here
     ep$lwd <- if (identical(col_here, "grey80")) lwd_grey else lwd_col
     attr(node, "edgePar") <- ep
 
-    list(node = node, col = col_here)
+    list(node = node, col = col_here, cid = cid_here)
   }
 
   recolour_node(dend)$node
@@ -1372,4 +1382,3 @@ for (r in CFG$runs$heatmap) {
 }
 
 results
-
