@@ -10,7 +10,7 @@
 # -----------------------------
 CFG <- list(
   # Paths
-  workdir = "/Users/katjamuzek/Documents/PhD/Manuscript 101/R",
+  workdir = "C:/Users/yvandenboer/OneDrive - Institute of Natural Sciences/1_KBIN/99_General/6_Colleagues/2026.02.11_Katja_R",
   excel_file = "PhD_DLS_SLS_countings.xlsx",
   sheets = list(own = 1, all = 2),
 
@@ -57,7 +57,7 @@ CFG <- list(
   runs = list(
     clustering = list(
       # species
-      # list(name = "species_all_groups",    level = "species", use_all_data = TRUE,  plot_points = "Locality", include_groups = TRUE,  hull_group_var = "LakeSystem", min_taxa_present = 3L),
+      list(name = "species_all_groups",    level = "species", use_all_data = TRUE,  plot_points = "Locality", include_groups = TRUE,  hull_group_var = "LakeSystem", min_taxa_present = 3L)
       # list(name = "species_all_nogroups",  level = "species", use_all_data = TRUE,  plot_points = "Locality", include_groups = FALSE, hull_group_var = "LakeSystem", min_taxa_present = 3L),
       # list(name = "species_own_groups",    level = "species", use_all_data = FALSE, plot_points = "Locality", include_groups = TRUE,  hull_group_var = "LakeSystem", min_taxa_present = 3L),
       # list(name = "species_own_nogroups",  level = "species", use_all_data = FALSE, plot_points = "Locality", include_groups = FALSE, hull_group_var = "LakeSystem", min_taxa_present = 3L),
@@ -323,11 +323,15 @@ get_comm_matrix <- function(level = c("genus", "species"),
     } else {
       own_pa <- own_raw %>%
         select(!!sym(id_col), Taxon) %>% rename(ID = !!sym(id_col), Tax = Taxon) %>%
+        dplyr::mutate(Tax = trimws(as.character(Tax))) %>%
+        dplyr::filter(grepl("\\s+", Tax)) %>%
         distinct() %>% mutate(Count = 1L) %>%
         drop_groups_long(., "Tax", include_groups)
 
       pub_pa <- all_raw %>%
         select(!!sym(id_col), Taxon) %>% rename(ID = !!sym(id_col), Tax = Taxon) %>%
+        dplyr::mutate(Tax = trimws(as.character(Tax))) %>%
+        dplyr::filter(grepl("\\s+", Tax)) %>%
         distinct() %>% mutate(Count = 1L) %>%
         drop_groups_long(., "Tax", include_groups)
     }
@@ -351,6 +355,8 @@ get_comm_matrix <- function(level = c("genus", "species"),
   } else {
     long_tbl <- own_raw %>%
       select(!!sym(id_col), Taxon, Count) %>% rename(ID = !!sym(id_col), Tax = Taxon) %>%
+      dplyr::mutate(Tax = trimws(as.character(Tax))) %>%
+      dplyr::filter(grepl("\\s+", Tax)) %>%
       drop_groups_long(., "Tax", include_groups) %>%
       group_by(ID, Tax) %>% summarise(Count = sum(Count, na.rm = TRUE), .groups = "drop")
   }
@@ -380,6 +386,30 @@ hull_palette <- function(levels_vec) {
 
 cluster_palette <- function(n) scales::hue_pal(h = c(0, 260))(n)
 
+# Lighter/pastel variant of a rainbow-like qualitative palette.
+# Uses HCL (Hue-Chroma-Luminance) to keep colours readable but soft.
+# Default luminance is slightly lowered (darker) to improve contrast.
+pastel_rainbow <- function(n, l = 68, c = 58, start = 10, end = 350, alpha = 1) {
+  n <- as.integer(n)
+  if (is.na(n) || n < 1L) return(character())
+  hues <- seq(from = start, to = end, length.out = n + 1L)[seq_len(n)]
+  grDevices::hcl(h = hues, c = c, l = l, alpha = alpha)
+}
+
+compact <- function(x) Filter(Negate(is.null), x)
+
+# Cluster palette used consistently across:
+# - taxa dendrograms
+# - locality/basin dendrograms (standalone plots)
+# - heatmap column dendrogram
+#
+# The mapping is purely by cluster id ("1".."k"), so the same parameter set and
+# same k yields the same colours across all dendrogram contexts.
+cluster_palette_named <- function(k, palette_fun = pastel_rainbow) {
+  k <- as.integer(k)
+  if (is.na(k) || k < 1L) stop("k must be a positive integer")
+  stats::setNames(palette_fun(k), as.character(seq_len(k)))
+}
 
 hull_legend_title <- function(hull_group_var) {
   if (is.null(hull_group_var)) return(NULL)
@@ -546,6 +576,112 @@ make_hulls_line <- function(df, x = "Axis1", y = "Axis2", group_var) {
   df2
 }
 
+
+# -----------------------------
+# DENDROGRAM COLOURING HELPERS
+# (must be defined before plot_dendrogram())
+# -----------------------------
+
+# Colour dendrogram edges by cluster membership (branches only; labels handled separately).
+color_dend_by_membership <- function(dend, membership, palette, mixed_col = "grey40", lwd_col = 2.5, lwd_default = 1) {
+  stopifnot(inherits(dend, "dendrogram"))
+  if (is.null(names(membership))) stop("membership must be a named vector (names are leaf labels).")
+  if (is.null(names(palette))) stop("palette must be a named vector (names are cluster IDs as character).")
+
+  rec <- function(node) {
+    if (is.leaf(node)) {
+      lab <- labels(node)
+      if (!lab %in% names(membership)) stop("membership missing label: ", lab)
+      id <- as.character(membership[[lab]])
+      if (!id %in% names(palette)) stop("palette missing cluster id: ", id)
+      attr(node, "leaf_ids") <- id
+      # edgePar on leaves controls the terminal branch (to the leaf)
+      ep <- attr(node, "edgePar")
+      if (is.null(ep) || !is.list(ep)) ep <- list()
+      ep <- modifyList(ep, list(col = unname(palette[[id]]), lwd = lwd_col))
+      attr(node, "edgePar") <- ep
+      return(node)
+    }
+
+    node[] <- lapply(node, rec)
+    ids <- unique(unlist(lapply(node, function(x) attr(x, "leaf_ids"))))
+    attr(node, "leaf_ids") <- ids
+
+    col_use <- if (length(ids) == 1L) unname(palette[[ids]]) else mixed_col
+    ep <- attr(node, "edgePar")
+    if (is.null(ep) || !is.list(ep)) ep <- list()
+    lwd_use <- if (length(ids) == 1L) lwd_col else lwd_default
+    ep <- modifyList(ep, list(col = col_use, lwd = lwd_use))
+    attr(node, "edgePar") <- ep
+    node
+  }
+
+  dend2 <- rec(dend)
+
+  # Clean up helper attribute
+  clean <- function(node) {
+    attr(node, "leaf_ids") <- NULL
+    if (!is.leaf(node)) node[] <- lapply(node, clean)
+    node
+  }
+  clean(dend2)
+}
+
+# Ensure internal node heights are strictly increasing (avoids drawing artefacts with ties).
+bump_zero_heights <- function(dend, eps = 1e-6) {
+  rec <- function(node) {
+    if (is.leaf(node)) return(node)
+    node[] <- lapply(node, rec)
+    ch <- vapply(node, function(x) attr(x, "height"), numeric(1))
+    h  <- attr(node, "height")
+    if (is.null(h)) h <- max(ch, na.rm = TRUE)
+    min_ok <- max(ch, na.rm = TRUE)
+    if (!is.finite(h) || h <= min_ok) h <- min_ok + eps
+    attr(node, "height") <- h
+    node
+  }
+  rec(dend)
+}
+
+# Build dendrogram from hclust and colour branches according to a leaf->cluster mapping (or cutree()).
+color_cluster_leaf_branches <- function(hc_obj,
+                                       k,
+                                       leaf_group_ids = NULL,
+                                       palette_k = NULL,
+                                       mixed_col = "grey70",
+                                       bump_zero = FALSE,
+                                       eps = 1e-6) {
+  stopifnot(inherits(hc_obj, "hclust"))
+  dend <- as.dendrogram(hc_obj)
+  if (isTRUE(bump_zero)) dend <- bump_zero_heights(dend, eps = eps)
+
+  if (is.null(leaf_group_ids)) {
+    leaf_group_ids <- cutree(hc_obj, k = k)
+  }
+  if (is.null(names(leaf_group_ids))) stop("leaf_group_ids must be a named vector (names are leaf labels).")
+
+  labs <- labels(dend)
+  leaf_group_ids <- leaf_group_ids[labs]
+  if (anyNA(leaf_group_ids)) {
+    missing <- labs[is.na(leaf_group_ids)]
+    stop("leaf_group_ids missing these labels: ", paste(missing[1:min(20, length(missing))], collapse = ", "))
+  }
+
+  ids <- as.integer(leaf_group_ids)
+  id_levels <- sort(unique(ids))
+
+  if (is.null(palette_k)) {
+    palette_k <- setNames(grDevices::hcl.colors(length(id_levels), palette = "Dynamic"),
+                          as.character(id_levels))
+  }
+  if (!all(as.character(id_levels) %in% names(palette_k))) {
+    miss <- setdiff(as.character(id_levels), names(palette_k))
+    stop("palette_k missing IDs: ", paste(miss, collapse = ", "))
+  }
+
+  color_dend_by_membership(dend, stats::setNames(ids, labs), palette_k, mixed_col = mixed_col)
+}
+
 plot_dendrogram <- function(hc_obj, k, title,
                             hull_group_var = NULL,
                             exclude_dendrogram_loc = NULL) {
@@ -554,7 +690,17 @@ plot_dendrogram <- function(hc_obj, k, title,
              ggplot2::labs(title = title, " (dendrogram unavailable: <2 localities)"))
   }
 
-  dend <- color_dendrogram_by_group(hc_obj, group_var = hull_group_var)
+  cl_pal <- cluster_palette_named(k)
+  membership <- stats::cutree(hc_obj, k = k)
+  dend <- color_cluster_leaf_branches(
+    hc_obj,
+    k = k,
+    leaf_group_ids = membership,
+    palette_k = cl_pal,
+    mixed_col = "grey70",
+    bump_zero = any(hc_obj$height <= 0)
+  )
+
   gd <- dendextend::as.ggdend(dend)
   seg <- gd$segments
   if (is.null(seg) || nrow(seg) == 0L) {
@@ -564,58 +710,110 @@ plot_dendrogram <- function(hc_obj, k, title,
   }
   if (!"col" %in% names(seg)) seg$col <- "grey30"
 
-  pal_attr <- attr(dend, "group_palette")
-  na_col <- attr(dend, "na_col")
-  if (is.null(pal_attr)) pal_attr <- character()
-  if (is.null(na_col)) na_col <- "grey60"
+  y_max_raw <- suppressWarnings(max(c(seg$y, seg$yend), na.rm = TRUE))
+  if (!is.finite(y_max_raw) || y_max_raw <= 0) y_max_raw <- 1
+  if (y_max_raw < 1) {
+    sf <- 1 / y_max_raw
+    seg$y    <- seg$y * sf
+    seg$yend <- seg$yend * sf
+  }
 
-  col_to_group <- if (length(pal_attr) > 0) setNames(names(pal_attr), unname(pal_attr)) else character()
-  seg$BranchGroup <- col_to_group[seg$col]
-  seg$BranchGroup[is.na(seg$BranchGroup)] <- "Mixed/NA"
-  seg$BranchGroup <- factor(seg$BranchGroup, levels = c(names(pal_attr), "Mixed/NA"))
-
-  branch_values <- c(pal_attr, "Mixed/NA" = na_col)
-  branch_legend_name <- hull_legend_title(hull_group_var)
+  seg$y    <- pmax(seg$y, 0)
+  seg$yend <- pmax(seg$yend, 0)
 
   labs_df <- tibble::tibble(
     Locality = hc_obj$labels[hc_obj$order],
     x = seq_along(hc_obj$order),
-    Cluster = factor(unname(stats::cutree(hc_obj, k = k)[hc_obj$labels[hc_obj$order]]))
+    Cluster = as.character(unname(stats::cutree(hc_obj, k = k)[hc_obj$labels[hc_obj$order]]))
   ) %>%
-    dplyr::left_join(metadata_mapping, by = "Locality")
+    dplyr::left_join(metadata_mapping, by = "Locality") %>%
+    dplyr::mutate(
+      LakeSystem = as.character(LakeSystem),
+      LakeSystem_plot = dplyr::if_else(
+        is.na(LakeSystem) | LakeSystem == "Unknown",
+        NA_character_, LakeSystem
+      )
+    )
 
   if (!is.null(exclude_dendrogram_loc) && length(exclude_dendrogram_loc) > 0) {
     labs_df <- labs_df %>% dplyr::filter(!Locality %in% as.character(exclude_dendrogram_loc))
   }
 
   y_max <- max(c(seg$y, seg$yend), na.rm = TRUE)
-  node_offset <- -0.04 * y_max
-  label_y <- node_offset - 0.06 * y_max
-  y_min <- label_y - y_max * 0.30
+  y_scale <- max(y_max, 1)
+
+  ## ---- VISUAL TIP GAP (key edit) ----
+  tip_gap_frac <- 0.05
+  tip_shift <- tip_gap_frac * y_scale
+  seg$y    <- seg$y + tip_shift
+  seg$yend <- seg$yend + tip_shift
+  ## ----------------------------------
+
+  node_gap_frac  <- 0.09
+  label_gap_frac <- 0.06
+
+  tip_y   <- 0
+  node_y  <- -node_gap_frac * y_scale
+  label_y <- node_y - label_gap_frac * y_scale
+  y_min   <- label_y - 0.30 * y_scale
+
+  tip_pos <- if ("label" %in% names(seg)) {
+    seg %>%
+      dplyr::filter(!is.na(.data$label), .data$x == .data$xend, .data$yend == tip_shift) %>%
+      dplyr::distinct(.data$label, .data$xend)
+  } else {
+    gd$labels %>%
+      dplyr::transmute(label = .data$label, xend = .data$x)
+  }
+
+  leaf_ext <- tip_pos %>%
+    dplyr::left_join(
+      labs_df %>% dplyr::select(Locality, Cluster),
+      by = c("label" = "Locality")
+    ) %>%
+    dplyr::mutate(
+      x = xend,
+      y = tip_y,
+      yend = node_y,
+      col = unname(cl_pal[as.character(Cluster)])
+    )
+
+  labs_df$Cluster <- factor(labs_df$Cluster, levels = names(cl_pal))
 
   ggplot2::ggplot() +
     ggplot2::geom_segment(
       data = seg,
-      ggplot2::aes(x = x, y = y, xend = xend, yend = yend, color = BranchGroup),
+      ggplot2::aes(x = x, y = y, xend = xend, yend = yend, color = I(col)),
       linewidth = 1
     ) +
-    ggplot2::scale_color_manual(values = branch_values,
-                                breaks = setdiff(names(branch_values), "Mixed/NA"),
-                                name = branch_legend_name) +
+    ggplot2::geom_segment(
+      data = leaf_ext,
+      ggplot2::aes(x = x, y = y, xend = xend, yend = yend, color = I(col)),
+      linewidth = 1
+    ) +
+    ggplot2::scale_color_identity(guide = "none") +
     ggnewscale::new_scale_color() +
     ggplot2::geom_point(
       data = labs_df,
-      ggplot2::aes(x = x, y = node_offset, shape = Source, color = Cluster),
-      size = 2.1,
-      show.legend = c(color = FALSE, shape = TRUE)
+      ggplot2::aes(x = x, y = node_y, shape = Source, color = LakeSystem_plot),
+      size = 2.1
     ) +
+    ggplot2::scale_color_manual(
+      values = hull_palette(sort(unique(stats::na.omit(as.character(labs_df$LakeSystem_plot))))),
+      na.value = "grey60",
+      guide = ggplot2::guide_legend(title = "Lake system"),
+      na.translate = FALSE
+    ) +
+    ggnewscale::new_scale_color() +
     ggplot2::geom_text(
       data = labs_df,
-      ggplot2::aes(x = x, y = label_y, label = Locality, color = Cluster),
-      angle = 90, hjust = 1, vjust = 0.5, size = 2.5, show.legend = FALSE
+      ggplot2::aes(x = x, y = label_y, label = Locality),
+      angle = 90, hjust = 1, vjust = 0.5, size = 2.5, color = "grey20"
     ) +
-    ggplot2::scale_color_manual(values = cluster_palette(length(levels(labs_df$Cluster))), guide = "none") +
-    ggplot2::scale_shape_manual(values = c("Own observations" = 16, "Literature" = 17), drop = FALSE) +
+    ggplot2::scale_shape_manual(
+      values = c("Own observations" = 16, "Literature" = 17),
+      drop = TRUE, na.translate = FALSE
+    ) +
     ggplot2::labs(title = title) +
     ggplot2::theme_bw() +
     ggplot2::theme(
@@ -623,13 +821,17 @@ plot_dendrogram <- function(hc_obj, k, title,
       axis.text = ggplot2::element_blank(),
       axis.ticks = ggplot2::element_blank(),
       axis.title = ggplot2::element_blank(),
-      plot.margin = ggplot2::margin(5.5, 5.5, 0, 5.5, unit = "pt")
+      plot.margin = ggplot2::margin(5.5, 5.5, 0, 5.5, unit = "pt"),
+      panel.border = ggplot2::element_blank()
     ) +
-    ggplot2::coord_cartesian(ylim = c(y_min, y_max), clip = "off") +
-    ggplot2::theme(panel.border = ggplot2::element_blank()) +
-    ggplot2::guides(shape = ggplot2::guide_legend(override.aes = list(color = "grey30")))
+    ggplot2::coord_cartesian(
+      ylim = c(y_min, max(y_max + tip_shift, 1)),
+      clip = "off"
+    ) +
+    ggplot2::guides(
+      shape = ggplot2::guide_legend(override.aes = list(color = "grey30"))
+    )
 }
-
 
 pcoa_df <- function(dist_obj, mat, hc_obj, k) {
   fit <- stats::cmdscale(dist_obj, eig = TRUE, k = 2)
@@ -1035,6 +1237,7 @@ save_heatmaps <- function(run_params) {
       use_all_data = TRUE,                # TRUE = own + literature (PA only); FALSE = own-only (raw/rel/hel/PA)
       plot_points = "Locality",
       include_groups = TRUE,
+      annotation_type = "shape",          # "shape" (default) or "bar"
       min_taxa_present = 1L,
       lake_system_bar_height_mm = 3,
       source_bar_height_mm = 3,
@@ -1084,75 +1287,165 @@ save_heatmaps <- function(run_params) {
     2L
   }
 
-  # helper: build a high-contrast qualitative palette for cluster colouring.
-  # If k is large, the palette is recycled (intentionally) to keep colours vivid.
-  make_cluster_cols <- function(k) {
-    base <- c(
-      "#d73027", # red
-      "#4575b4", # blue
-      "#1a9850", # green
-      "#984ea3", # purple
-      "#ff7f00", # orange
-      "#e7298a", # magenta
-      "#66a61e", # olive
-      "#e6ab02", # mustard
-      "#a6761d", # brown
-      "#1b9e77", # teal
-      "#7570b3", # indigo
-      "#e41a1c", # bright red
-      "#377eb8", # bright blue
-      "#4daf4a"  # bright green
-    )
-    rep(base, length.out = k)
+  # helper: build a wide qualitative palette for branch colouring.
+  # No recycling: request exactly n colours.
+  make_cluster_cols <- function(n) {
+    n <- as.integer(n)
+    if (is.na(n) || n < 1L) stop("n must be a positive integer.")
+    pastel_rainbow(n)
   }
 
-# helper: colour dendrogram edges so that parent branches inherit a child colour
-# only when *all* descendants are in the same cutree cluster. Mixed children -> grey80.
-#
-# We traverse the dendrogram bottom-up and propagate a single branch colour upwards.
-# This guarantees consistency for all parent branches in PA and quantitative heatmaps.
-color_cluster_leaf_branches <- function(hc_obj, k, lwd_col = 2.0, lwd_grey = 1.0) {
-  cols <- make_cluster_cols(k)
-  cl <- as.integer(stats::cutree(hc_obj, k = k))
-  dend <- as.dendrogram(hc_obj)
+  # helper: for presence/absence taxa matrices, cluster unique 0/1 profiles first,
+  # then map profile-cluster IDs back to taxa so identical profiles always share a group.
+  pa_profile_cluster_ids <- function(m_tax_x_loc_bin, k, hclust_method = "ward.D2") {
+    if (!is.matrix(m_tax_x_loc_bin)) m_tax_x_loc_bin <- as.matrix(m_tax_x_loc_bin)
+    m_bin <- ifelse(m_tax_x_loc_bin > 0, 1L, 0L)
 
-  # leaves are encountered in hc_obj$order when traversing the dendrogram left-to-right
-  leaf_pos <- 0L
+    keys <- apply(m_bin, 1, function(x) paste0(as.integer(x), collapse = "|"))
+    key_to_first <- !duplicated(keys)
+    m_unique <- m_bin[key_to_first, , drop = FALSE]
+    key_unique <- keys[key_to_first]
 
-  recolour_node <- function(node) {
-    ep <- attr(node, "edgePar")
-    if (is.null(ep)) ep <- list()
+    rownames(m_unique) <- key_unique
 
-    if (stats::is.leaf(node)) {
-      leaf_pos <<- leaf_pos + 1L
-      obs_idx <- hc_obj$order[leaf_pos]
-      cid <- cl[obs_idx]
-      col_here <- cols[cid]
-
-      ep$col <- col_here
-      ep$lwd <- lwd_col
-      attr(node, "edgePar") <- ep
-      return(list(node = node, col = col_here))
+    if (nrow(m_unique) == 1L) {
+      cl_unique <- stats::setNames(1L, key_unique)
+    } else {
+      d_unique <- vegan::vegdist(m_unique, method = "jaccard", binary = TRUE)
+      hc_unique <- stats::hclust(d_unique, method = hclust_method)
+      k_use <- max(1L, min(as.integer(k), nrow(m_unique)))
+      cl_unique <- stats::cutree(hc_unique, k = k_use)
+      names(cl_unique) <- rownames(m_unique)
     }
 
-    child_out <- lapply(node, recolour_node)
-    for (i in seq_along(node)) node[[i]] <- child_out[[i]]$node
-
-    child_cols <- vapply(child_out, function(x) x$col, character(1))
-    uniq_child <- unique(child_cols)
-
-    col_here <- if (length(uniq_child) == 1L) uniq_child else "grey80"
-    ep$col <- col_here
-    ep$lwd <- if (identical(col_here, "grey80")) lwd_grey else lwd_col
-    attr(node, "edgePar") <- ep
-
-    list(node = node, col = col_here)
+    cl_taxa <- unname(cl_unique[keys])
+    stats::setNames(as.integer(cl_taxa), rownames(m_bin))
   }
 
-  recolour_node(dend)$node
+  # helper: colour dendrogram edges by leaf groups using a label-based mapping.
+  # This avoids order-dependent mismatches in trees with many distance ties.
+  # helper: colour dendrogram edges by leaf groups using a label-based mapping.
+# This avoids order-dependent mismatches in trees with many distance ties and allows
+# different linewidths for single-cluster vs mixed branches (used by ComplexHeatmap).
+color_dend_by_membership <- function(dend, membership, palette, mixed_col = "grey40",
+                                     lwd_col = 2.5, lwd_default = 1) {
+  stopifnot(inherits(dend, "dendrogram"))
+  if (is.null(names(membership))) stop("membership must be a named vector (names are leaf labels).")
+  if (is.null(names(palette))) stop("palette must be a named vector (names are cluster IDs as character).")
+
+  rec <- function(node) {
+    if (is.leaf(node)) {
+      lab <- labels(node)
+      if (!lab %in% names(membership)) stop("membership missing label: ", lab)
+      id <- as.character(membership[[lab]])
+      if (!id %in% names(palette)) stop("palette missing cluster id: ", id)
+      attr(node, "leaf_ids") <- id
+      # edgePar on leaves controls the terminal branch (to the leaf)
+      ep <- attr(node, "edgePar")
+      if (is.null(ep) || !is.list(ep)) ep <- list()
+      ep <- modifyList(ep, list(col = unname(palette[[id]]), lwd = lwd_col))
+      attr(node, "edgePar") <- ep
+      return(node)
+    }
+
+    node[] <- lapply(node, rec)
+    ids <- unique(unlist(lapply(node, function(x) attr(x, "leaf_ids"))))
+    attr(node, "leaf_ids") <- ids
+
+    col_use <- if (length(ids) == 1L) unname(palette[[ids]]) else mixed_col
+    lwd_use <- if (length(ids) == 1L) lwd_col else lwd_default
+
+    ep <- attr(node, "edgePar")
+    if (is.null(ep) || !is.list(ep)) ep <- list()
+    # IMPORTANT: ComplexHeatmap uses 'lwd' (not 'linewidth') when converting to grid grobs.
+    ep <- modifyList(ep, list(col = col_use, lwd = lwd_use))
+    attr(node, "edgePar") <- ep
+    node
+  }
+
+  dend2 <- rec(dend)
+
+  # Clean helper attribute
+  clean <- function(node) {
+    attr(node, "leaf_ids") <- NULL
+    if (!is.leaf(node)) node[] <- lapply(node, clean)
+    node
+  }
+  clean(dend2)
 }
 
-  # metadata for locality annotations (match clustering behaviour)
+  # helper: ensure dendrogram has drawable leaf-adjacent segments by enforcing
+  # strictly increasing heights (useful for PA + Jaccard where many merges occur at height 0).
+  bump_zero_heights <- function(dend, eps = 1e-6) {
+    stopifnot(inherits(dend, "dendrogram"))
+    rec <- function(node) {
+      if (is.leaf(node)) {
+        if (is.null(attr(node, "height"))) attr(node, "height") <- 0
+        return(node)
+      }
+      for (k in seq_along(node)) node[[k]] <- rec(node[[k]])
+
+      ch <- sapply(node, function(x) attr(x, "height"))
+      h  <- attr(node, "height")
+      if (is.null(h)) h <- max(ch)
+
+      min_ok <- max(ch)
+      if (is.na(h) || h <= min_ok) h <- min_ok + eps
+
+      attr(node, "height") <- h
+      node
+    }
+    rec(dend)
+  }
+
+  # wrapper used throughout the script: build a dendrogram from an hclust and colour
+  # branches based on an explicit leaf->cluster mapping (or cutree if none provided).
+  # Uses membership-driven colouring to avoid PA + Jaccard tie artefacts.
+  color_cluster_leaf_branches <- function(hc_obj,
+                                         k,
+                                         leaf_group_ids = NULL,
+                                         palette_k = NULL,
+                                         mixed_col = "grey70",
+                                         bump_zero = FALSE,
+                                         eps = 1e-6) {
+    stopifnot(inherits(hc_obj, "hclust"))
+    dend <- as.dendrogram(hc_obj)
+    if (isTRUE(bump_zero)) dend <- bump_zero_heights(dend, eps = eps)
+
+    if (is.null(leaf_group_ids)) {
+      leaf_group_ids <- cutree(hc_obj, k = k)
+    }
+
+    # align to dendrogram labels
+    labs <- labels(dend)
+    if (is.null(names(leaf_group_ids))) {
+      stop("leaf_group_ids must be a named vector with names matching leaf labels")
+    }
+    leaf_group_ids <- leaf_group_ids[labs]
+    if (anyNA(leaf_group_ids)) {
+      missing <- labs[is.na(leaf_group_ids)]
+      stop("leaf_group_ids missing these labels: ", paste(missing[1:min(20, length(missing))], collapse = ", "))
+    }
+
+    ids <- as.integer(leaf_group_ids)
+    id_levels <- sort(unique(ids))
+
+    if (is.null(palette_k)) {
+      palette_k <- setNames(grDevices::hcl.colors(length(id_levels), palette = "Dynamic"), as.character(id_levels))
+    }
+
+    # ensure palette covers all ids
+    if (!all(as.character(id_levels) %in% names(palette_k))) {
+      miss <- setdiff(as.character(id_levels), names(palette_k))
+      stop("palette_k missing IDs: ", paste(miss, collapse = ", "))
+    }
+
+    color_dend_by_membership(dend, leaf_group_ids, palette_k, mixed_col = mixed_col)
+  }
+
+
+
+# metadata for locality annotations (match clustering behaviour)
   meta_map <- build_metadata_mapping(level = level, use_all_data = use_all_data, plot_points = plot_points, include_groups = isTRUE(p$include_groups))
   metadata_mapping <<- meta_map
 
@@ -1202,12 +1495,43 @@ color_cluster_leaf_branches <- function(hc_obj, k, lwd_col = 2.0, lwd_grey = 1.0
     dist_tax <- vegan::vegdist(m_tax_x_loc, method = dist_method, binary = binary_flag)
     hc_tax <- stats::hclust(dist_tax, method = "ward.D2")
     k_tax <- best_k(dist_tax, hc_tax)
-    row_dend <- color_cluster_leaf_branches(hc_tax, k_tax)
+
+    # Build row dendrogram and colour edges by membership (label-based mapping).
+    # For PA+Jaccard, bump zero-height merges so leaf-adjacent segments are drawable.
+    if (nm == "pa_jc") {
+      # identical 0/1 profiles receive the same cluster id
+      membership_tax <- pa_profile_cluster_ids(m_tax_x_loc, k = k_tax, hclust_method = "ward.D2")
+
+      ids <- sort(unique(as.integer(membership_tax)))
+      palette_k <- setNames(make_cluster_cols(length(ids)), as.character(ids))
+
+      row_dend <- as.dendrogram(hc_tax)
+      row_dend <- bump_zero_heights(row_dend, eps = 1e-6)
+      row_dend <- color_dend_by_membership(row_dend, membership_tax, palette_k, mixed_col = "grey70")
+    } else {
+      membership_tax <- stats::cutree(hc_tax, k = k_tax)
+
+      ids <- sort(unique(as.integer(membership_tax)))
+      palette_k <- setNames(make_cluster_cols(length(ids)), as.character(ids))
+
+      row_dend <- as.dendrogram(hc_tax)
+      row_dend <- color_dend_by_membership(row_dend, membership_tax, palette_k, mixed_col = "grey70")
+    }
+
 
     dist_loc <- vegan::vegdist(m_loc_x_tax, method = dist_method, binary = binary_flag)
     hc_loc <- stats::hclust(dist_loc, method = "ward.D2")
     k_loc <- best_k(dist_loc, hc_loc)
-    col_dend <- color_cluster_leaf_branches(hc_loc, k_loc)
+    membership_loc <- stats::cutree(hc_loc, k = k_loc)
+    pal_loc <- cluster_palette_named(k_loc)
+    col_dend <- color_cluster_leaf_branches(
+      hc_loc,
+      k_loc,
+      leaf_group_ids = membership_loc,
+      palette_k = pal_loc,
+      mixed_col = "grey70",
+      bump_zero = (nm == "pa_jc")
+    )
 
     # locality annotations
     loc_ids <- colnames(m_tax_x_loc)
@@ -1226,7 +1550,7 @@ color_cluster_leaf_branches <- function(hc_obj, k, lwd_col = 2.0, lwd_grey = 1.0
     top_ha <- ComplexHeatmap::HeatmapAnnotation(
       Richness = ComplexHeatmap::anno_text(
         taxa_present_n,
-        rot = 45,
+        rot = 60,
         gp = grid::gpar(fontsize = 8),
         location = 0.15,
         just = "left"
@@ -1234,17 +1558,54 @@ color_cluster_leaf_branches <- function(hc_obj, k, lwd_col = 2.0, lwd_grey = 1.0
       show_annotation_name = FALSE
     )
 
-    bottom_ha <- ComplexHeatmap::HeatmapAnnotation(
-      LakeSystem = loc_group,
-      Source = loc_source,
-      col = list(LakeSystem = ls_cols, Source = src_cols),
-      show_annotation_name = FALSE,
-      annotation_height = grid::unit.c(
-        grid::unit(as.numeric(p$lake_system_bar_height_mm), "mm"),
-        grid::unit(as.numeric(p$source_bar_height_mm), "mm")
-      ),
-      show_legend = FALSE
-    )
+    ann_type <- match.arg(as.character(p$annotation_type), c("bar", "shape"))
+
+    if (ann_type == "bar") {
+      # Bar annotations with per-locality dotted separators and a surrounding border.
+      bottom_ha <- ComplexHeatmap::HeatmapAnnotation(
+        LakeSystem = ComplexHeatmap::anno_simple(
+          loc_group,
+          col = ls_cols,
+      border = (ann_type == "bar"),
+          gp = grid::gpar(col = "black", lty = "dotted", lwd = 0.5)
+        ),
+        Source = ComplexHeatmap::anno_simple(
+          loc_source,
+          col = src_cols,
+          border = (ann_type == "bar"),
+          gp = grid::gpar(col = "black", lty = "dotted", lwd = 0.5)
+        ),
+        show_annotation_name = FALSE,
+        annotation_height = grid::unit.c(
+          grid::unit(as.numeric(p$lake_system_bar_height_mm), "mm"),
+          grid::unit(as.numeric(p$source_bar_height_mm), "mm")
+        ),
+        show_legend = FALSE,
+        border = FALSE
+      )
+    } else {
+      # Shape annotation: point colour = LakeSystem, point shape = Source.
+      src_chr <- as.character(loc_source)
+      pch_vec <- ifelse(src_chr == "Own observations", 16, 17)
+      col_vec <- unname(ls_cols[as.character(loc_group)])
+      col_vec[is.na(col_vec)] <- "grey60"
+
+      bottom_ha <- ComplexHeatmap::HeatmapAnnotation(
+        LocalityInfo = ComplexHeatmap::anno_points(
+          x = rep(1, length(loc_ids)),
+          pch = pch_vec,
+          gp = grid::gpar(col = col_vec),
+          size = grid::unit(2.2, "mm"),
+          axis = FALSE,
+          border = FALSE
+        ),
+        show_annotation_name = FALSE,
+        annotation_height = grid::unit(max(as.numeric(p$lake_system_bar_height_mm), as.numeric(p$source_bar_height_mm)), "mm"),
+        show_legend = FALSE,
+        border = FALSE,
+        gp = grid::gpar(col = NA, fill = NA)
+      )
+    }
 
     # heatmap colors
     if (nm == "pa_jc") {
@@ -1268,7 +1629,7 @@ color_cluster_leaf_branches <- function(hc_obj, k, lwd_col = 2.0, lwd_grey = 1.0
       lgd_main <- ComplexHeatmap::Legend(title = "Abundance", col_fun = col_fun, at = at_vals)
       hm_name <- "Abundance"
     }
-
+    
     ht <- ComplexHeatmap::Heatmap(
       mat_plot,
       name = hm_name,
@@ -1277,19 +1638,25 @@ color_cluster_leaf_branches <- function(hc_obj, k, lwd_col = 2.0, lwd_grey = 1.0
       bottom_annotation = bottom_ha,
       cluster_rows = row_dend,
       cluster_columns = col_dend,
-      border = TRUE,
-      cell_fun = function(j, i, x, y, w, h, fill) {
+      row_dend_reorder = FALSE,
+      column_dend_reorder = FALSE,
+      row_dend_width = grid::unit(35, "mm"),
+      border = (ann_type == "bar"),
+      layer_fun = function(j, i, x, y, w, h, fill) {
         grid::grid.rect(x, y, w, h, gp = grid::gpar(col = "#c9d3c0", fill = NA, lwd = 0.4, lty = "dotted"))
         # For quantitative heatmaps, print abundance values inside each cell.
         if (nm != "pa_jc") {
-          v <- mat_plot[i, j]
-          if (!is.na(v) && v > 0) {
-            lab <- if (nm == "raw_bc") {
-              as.character(as.integer(round(v)))
+          v <- mat_plot[cbind(i, j)]  # vector of values aligned to i/j pairs
+          
+          ok <- !is.na(v) & (v > 0)
+          if (any(ok)) {
+            lab <- character(length(v))
+            if (nm == "raw_bc") {
+              lab[ok] <- as.character(as.integer(round(v[ok])))
             } else {
-              formatC(v, format = "f", digits = 2)
+              lab[ok] <- formatC(v[ok], format = "f", digits = 2)
             }
-            grid::grid.text(lab, x, y, gp = grid::gpar(fontsize = 6))
+            grid::grid.text(lab[ok], x[ok], y[ok], gp = grid::gpar(fontsize = 6))
           }
         }
       },
@@ -1300,24 +1667,56 @@ color_cluster_leaf_branches <- function(hc_obj, k, lwd_col = 2.0, lwd_grey = 1.0
       show_column_names = TRUE,
       column_names_rot = 90,
       column_names_gp = grid::gpar(fontsize = 6),
-      row_names_gp = grid::gpar(fontsize = 7, fontface = if (level == "species") "italic" else "plain"),
+      row_names_gp = grid::gpar(fontsize = 7, fontface = "italic"),
       show_heatmap_legend = FALSE
     )
 
     # legends for annotations
-    lgd_sys <- ComplexHeatmap::Legend(
-      title = "Lake system",
-      at = ls_levels,
-      legend_gp = grid::gpar(fill = unname(ls_cols[ls_levels]))
-    )
-    lgd_src <- ComplexHeatmap::Legend(
-      title = "Data source",
-      at = src_levels,
-      legend_gp = grid::gpar(fill = unname(src_cols[src_levels]))
-    )
+    ls_levels_present <- sort(unique(stats::na.omit(as.character(loc_group))))
+    ls_levels_present <- intersect(ls_levels_present, names(ls_cols))
+    src_levels_present <- sort(unique(stats::na.omit(as.character(loc_source))))
+    src_levels_present <- intersect(src_levels_present, names(src_cols))
 
-    data_label <- if (use_all_data) "All_data" else "Own_data"
-    fn <- file.path(CFG$out_dir_heatmap, paste0(run_params$name, "_", data_label, "_heatmap_", nm, "_minTaxa", p$min_taxa_present, ".tiff"))
+    # If the plot contains only one source level (e.g. own-only heatmaps),
+    # omit the "Data source" legend entirely.
+    show_source_legend <- length(src_levels_present) > 1L
+
+    if (ann_type == "bar") {
+      lgd_sys <- ComplexHeatmap::Legend(
+        title = "Lake system",
+        at = ls_levels_present,
+        legend_gp = grid::gpar(fill = unname(ls_cols[ls_levels_present]))
+      )
+      lgd_src <- if (show_source_legend) {
+        ComplexHeatmap::Legend(
+          title = "Data source",
+          at = src_levels_present,
+          legend_gp = grid::gpar(fill = unname(src_cols[src_levels_present]))
+        )
+      } else {
+        NULL
+      }
+    } else {
+      lgd_sys <- ComplexHeatmap::Legend(
+        title = "Lake system",
+        at = ls_levels_present,
+        type = "points",
+        pch = rep(16, length(ls_levels_present)),
+        legend_gp = grid::gpar(col = unname(ls_cols[ls_levels_present]), fill = NA))
+      lgd_src <- if (show_source_legend) {
+        ComplexHeatmap::Legend(
+          title = "Data source",
+          at = src_levels_present,
+          type = "points",
+          pch = unname(c("Own observations" = 16, "Literature" = 17)[src_levels_present]),
+          legend_gp = grid::gpar(col = "grey30", fill = NA)
+        )
+      } else {
+        NULL
+      }
+    }
+
+    fn <- file.path(CFG$out_dir_heatmap, paste0(run_params$name, "_heatmap_", nm, "_minTaxa", p$min_taxa_present, ".tiff"))
 
     height_in <- max(p$min_height_in, min(p$max_height_in, p$base_height_in + p$row_height_in * nrow(m_tax_x_loc)))
 
@@ -1331,11 +1730,12 @@ color_cluster_leaf_branches <- function(hc_obj, k, lwd_col = 2.0, lwd_grey = 1.0
     ComplexHeatmap::draw(
       ht,
       heatmap_legend_list = list(lgd_main),
-      annotation_legend_list = list(lgd_sys, lgd_src),
+      annotation_legend_list = compact(list(lgd_sys, lgd_src)),
       merge_legends = TRUE,
       padding = grid::unit(c(6, 6, 6, 6), "mm")
     )
     ComplexHeatmap::decorate_heatmap_body(hm_name, {
+      grid::grid.rect(x = 0.5, y = 0.5, width = 1, height = 1, gp = grid::gpar(col = "grey30", fill = NA, lwd = 1))
       grid::grid.text(
         "Taxa richness",
         x = grid::unit(-22, "mm"),
