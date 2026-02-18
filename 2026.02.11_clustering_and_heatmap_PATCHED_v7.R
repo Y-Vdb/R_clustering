@@ -61,7 +61,7 @@ CFG <- list(
       # list(name = "species_all_nogroups",  level = "species", use_all_data = TRUE,  plot_points = "Locality", include_groups = FALSE, hull_group_var = "LakeSystem", min_taxa_present = 3L),
       # list(name = "species_own_groups",    level = "species", use_all_data = FALSE, plot_points = "Locality", include_groups = TRUE,  hull_group_var = "LakeSystem", min_taxa_present = 3L),
       # list(name = "species_own_nogroups",  level = "species", use_all_data = FALSE, plot_points = "Locality", include_groups = FALSE, hull_group_var = "LakeSystem", min_taxa_present = 3L),
-      
+
       # genus
       # list(name = "genus_all_groups",      level = "genus",   use_all_data = TRUE,  plot_points = "Locality", include_groups = TRUE,  hull_group_var = "LakeSystem", min_taxa_present = 3L),
       # list(name = "genus_all_nogroups",    level = "genus",   use_all_data = TRUE,  plot_points = "Locality", include_groups = FALSE, hull_group_var = "LakeSystem", min_taxa_present = 3L),
@@ -421,35 +421,35 @@ hull_legend_title <- function(hull_group_var) {
 make_hulls_poly_and_pairs <- function(df, x = "Axis1", y = "Axis2", group_var) {
   if (is.null(group_var)) return(list(poly = NULL, pairs = NULL))
   if (!group_var %in% names(df)) stop("hull_group_var not found in plotting data: ", group_var)
-  
+
   df2 <- df %>% filter(!is.na(.data[[group_var]]), !is.na(.data[[x]]), !is.na(.data[[y]]))
   if (nrow(df2) == 0) return(list(poly = NULL, pairs = NULL))
-  
+
   groups_n <- df2 %>%
     count(.data[[group_var]], name = "n") %>%
     rename(HullGroup = !!group_var)
-  
+
   # Polygons: n >= 3, closed
   poly <- df2 %>%
     inner_join(groups_n %>% filter(n >= 3), by = setNames("HullGroup", group_var)) %>%
     group_by(.data[[group_var]]) %>%
     group_modify(\(d, key) {
       stopifnot("Axis1" %in% names(d), "Axis2" %in% names(d))
-      
+
       d_xy <- dplyr::filter(d, !is.na(.data[["Axis1"]]), !is.na(.data[["Axis2"]]))
       if (nrow(d_xy) < 3) return(dplyr::slice(d_xy, 0))
-      
+
       idx <- grDevices::chull(d_xy[["Axis1"]], d_xy[["Axis2"]])
-      
+
       h <- d_xy[idx, , drop = FALSE]          # NOTE: comma => rows
       h <- dplyr::bind_rows(h, h[1, , drop = FALSE])  # close polygon
       h
     }) %>%
     ungroup() %>%
     rename(HullGroup = !!group_var)
-  
+
   if (nrow(poly) == 0) poly <- NULL
-  
+
   # Pairs: n == 2 -> segment between points
   pairs <- df2 %>%
     inner_join(groups_n %>% filter(n == 2), by = setNames("HullGroup", group_var)) %>%
@@ -462,36 +462,36 @@ make_hulls_poly_and_pairs <- function(df, x = "Axis1", y = "Axis2", group_var) {
       .groups = "drop"
     ) %>%
     rename(HullGroup = !!group_var)
-  
+
   if (nrow(pairs) == 0) pairs <- NULL
-  
+
   list(poly = poly, pairs = pairs)
 }
 
 color_dendrogram_by_group <- function(hc_obj, group_var) {
   if (is.null(group_var) || is.null(metadata_mapping)) return(as.dendrogram(hc_obj))
-  
+
   group_var <- as.character(group_var)
   if (length(group_var) != 1L) stop("hull_group_var/group_var must be a single column name (length 1).")
   if (!group_var %in% names(metadata_mapping)) stop("group_var not in metadata_mapping: ", group_var)
-  
+
   lab <- hc_obj$labels
-  
+
   group_map <- metadata_mapping %>%
     dplyr::select(Locality, Group = dplyr::all_of(group_var)) %>%
     dplyr::distinct(Locality, .keep_all = TRUE)
-  
+
   group_by_lab <- tibble::tibble(Locality = lab) %>%
     dplyr::left_join(group_map, by = "Locality") %>%
     dplyr::mutate(Group = as.character(Group)) %>%
     dplyr::pull(Group)
-  
+
   groups <- sort(unique(stats::na.omit(group_by_lab)))
   pal <- if (length(groups) > 0) stats::setNames(scales::hue_pal()(length(groups)), groups) else character()
   na_col <- "grey60"
-  
+
   dend <- as.dendrogram(hc_obj)
-  
+
   set_branch_cols_inplace <- function(node) {
     if (stats::is.leaf(node)) {
       lbl <- attr(node, "label")
@@ -500,14 +500,14 @@ color_dendrogram_by_group <- function(hc_obj, group_var) {
       attr(node, "edgePar") <- c(attr(node, "edgePar"), list(col = col, lwd = 0.7))
       return(list(node = node, groups = g))
     }
-    
+
     gs_all <- character(0)
     for (i in seq_along(node)) {
       child <- set_branch_cols_inplace(node[[i]])
       node[[i]] <- child$node
       gs_all <- c(gs_all, child$groups)
     }
-    
+
     gs_all_non_na <- gs_all[!is.na(gs_all)]
     g_unique <- unique(gs_all_non_na)
     col <- if (length(g_unique) == 1L) {
@@ -516,11 +516,11 @@ color_dendrogram_by_group <- function(hc_obj, group_var) {
     } else {
       na_col
     }
-    
+
     attr(node, "edgePar") <- c(attr(node, "edgePar"), list(col = col, lwd = 0.7))
     list(node = node, groups = gs_all)
   }
-  
+
   dend2 <- set_branch_cols_inplace(dend)$node
   attr(dend2, "group_palette") <- pal
   attr(dend2, "na_col") <- na_col
@@ -529,24 +529,24 @@ color_dendrogram_by_group <- function(hc_obj, group_var) {
 
 make_hulls_poly <- function(df, x = "Axis1", y = "Axis2", group_var) {
   if (is.null(group_var) || !group_var %in% names(df)) return(NULL)
-  
+
   df2 <- df |>
     dplyr::filter(
       !is.na(.data[[group_var]]),
       !is.na(.data[[x]]),
       !is.na(.data[[y]])
     )
-  
+
   if (nrow(df2) == 0) return(NULL)
-  
+
   # Keep only groups with >= 3 points (valid polygon hull)
   df2 <- df2 |>
     dplyr::group_by(.data[[group_var]]) |>
     dplyr::filter(dplyr::n() >= 3) |>
     dplyr::ungroup()
-  
+
   if (nrow(df2) == 0) return(NULL)
-  
+
   df2 |>
     dplyr::group_by(.data[[group_var]]) |>
     dplyr::slice(chull(.data[[x]], .data[[y]])) |>
@@ -555,24 +555,24 @@ make_hulls_poly <- function(df, x = "Axis1", y = "Axis2", group_var) {
 
 make_hulls_line <- function(df, x = "Axis1", y = "Axis2", group_var) {
   if (is.null(group_var) || !group_var %in% names(df)) return(NULL)
-  
+
   df2 <- df |>
     dplyr::filter(
       !is.na(.data[[group_var]]),
       !is.na(.data[[x]]),
       !is.na(.data[[y]])
     )
-  
+
   if (nrow(df2) == 0) return(NULL)
-  
+
   # Keep only groups with exactly 2 points (draw a line)
   df2 <- df2 |>
     dplyr::group_by(.data[[group_var]]) |>
     dplyr::filter(dplyr::n() == 2) |>
     dplyr::ungroup()
-  
+
   if (nrow(df2) == 0) return(NULL)
-  
+
   df2
 }
 
@@ -742,12 +742,11 @@ plot_dendrogram <- function(hc_obj, k, title,
   y_max <- max(c(seg$y, seg$yend), na.rm = TRUE)
   y_scale <- max(y_max, 1)
 
-  ## ---- VISUAL TIP GAP (key edit) ----
-  tip_gap_frac <- 0.05
-  tip_shift <- tip_gap_frac * y_scale
+  # publication layout: Branch > whitespace > node > whitespace > text
+  branch_node_gap_frac <- 0.05
+  tip_shift <- branch_node_gap_frac * y_scale
   seg$y    <- seg$y + tip_shift
   seg$yend <- seg$yend + tip_shift
-  ## ----------------------------------
 
   node_gap_frac  <- 0.09
   label_gap_frac <- 0.06
@@ -759,7 +758,7 @@ plot_dendrogram <- function(hc_obj, k, title,
 
   tip_pos <- if ("label" %in% names(seg)) {
     seg %>%
-      dplyr::filter(!is.na(.data$label), .data$x == .data$xend, .data$yend == tip_shift) %>%
+      dplyr::filter(!is.na(.data$label), .data$x == .data$xend, dplyr::near(.data$yend, tip_shift)) %>%
       dplyr::distinct(.data$label, .data$xend)
   } else {
     gd$labels %>%
@@ -1322,127 +1321,6 @@ save_heatmaps <- function(run_params) {
     stats::setNames(as.integer(cl_taxa), rownames(m_bin))
   }
 
-  # helper: colour dendrogram edges by leaf groups using a label-based mapping.
-  # This avoids order-dependent mismatches in trees with many distance ties.
-  # helper: colour dendrogram edges by leaf groups using a label-based mapping.
-# This avoids order-dependent mismatches in trees with many distance ties and allows
-# different linewidths for single-cluster vs mixed branches (used by ComplexHeatmap).
-color_dend_by_membership <- function(dend, membership, palette, mixed_col = "grey40",
-                                     lwd_col = 2.5, lwd_default = 1) {
-  stopifnot(inherits(dend, "dendrogram"))
-  if (is.null(names(membership))) stop("membership must be a named vector (names are leaf labels).")
-  if (is.null(names(palette))) stop("palette must be a named vector (names are cluster IDs as character).")
-
-  rec <- function(node) {
-    if (is.leaf(node)) {
-      lab <- labels(node)
-      if (!lab %in% names(membership)) stop("membership missing label: ", lab)
-      id <- as.character(membership[[lab]])
-      if (!id %in% names(palette)) stop("palette missing cluster id: ", id)
-      attr(node, "leaf_ids") <- id
-      # edgePar on leaves controls the terminal branch (to the leaf)
-      ep <- attr(node, "edgePar")
-      if (is.null(ep) || !is.list(ep)) ep <- list()
-      ep <- modifyList(ep, list(col = unname(palette[[id]]), lwd = lwd_col))
-      attr(node, "edgePar") <- ep
-      return(node)
-    }
-
-    node[] <- lapply(node, rec)
-    ids <- unique(unlist(lapply(node, function(x) attr(x, "leaf_ids"))))
-    attr(node, "leaf_ids") <- ids
-
-    col_use <- if (length(ids) == 1L) unname(palette[[ids]]) else mixed_col
-    lwd_use <- if (length(ids) == 1L) lwd_col else lwd_default
-
-    ep <- attr(node, "edgePar")
-    if (is.null(ep) || !is.list(ep)) ep <- list()
-    # IMPORTANT: ComplexHeatmap uses 'lwd' (not 'linewidth') when converting to grid grobs.
-    ep <- modifyList(ep, list(col = col_use, lwd = lwd_use))
-    attr(node, "edgePar") <- ep
-    node
-  }
-
-  dend2 <- rec(dend)
-
-  # Clean helper attribute
-  clean <- function(node) {
-    attr(node, "leaf_ids") <- NULL
-    if (!is.leaf(node)) node[] <- lapply(node, clean)
-    node
-  }
-  clean(dend2)
-}
-
-  # helper: ensure dendrogram has drawable leaf-adjacent segments by enforcing
-  # strictly increasing heights (useful for PA + Jaccard where many merges occur at height 0).
-  bump_zero_heights <- function(dend, eps = 1e-6) {
-    stopifnot(inherits(dend, "dendrogram"))
-    rec <- function(node) {
-      if (is.leaf(node)) {
-        if (is.null(attr(node, "height"))) attr(node, "height") <- 0
-        return(node)
-      }
-      for (k in seq_along(node)) node[[k]] <- rec(node[[k]])
-
-      ch <- sapply(node, function(x) attr(x, "height"))
-      h  <- attr(node, "height")
-      if (is.null(h)) h <- max(ch)
-
-      min_ok <- max(ch)
-      if (is.na(h) || h <= min_ok) h <- min_ok + eps
-
-      attr(node, "height") <- h
-      node
-    }
-    rec(dend)
-  }
-
-  # wrapper used throughout the script: build a dendrogram from an hclust and colour
-  # branches based on an explicit leaf->cluster mapping (or cutree if none provided).
-  # Uses membership-driven colouring to avoid PA + Jaccard tie artefacts.
-  color_cluster_leaf_branches <- function(hc_obj,
-                                         k,
-                                         leaf_group_ids = NULL,
-                                         palette_k = NULL,
-                                         mixed_col = "grey70",
-                                         bump_zero = FALSE,
-                                         eps = 1e-6) {
-    stopifnot(inherits(hc_obj, "hclust"))
-    dend <- as.dendrogram(hc_obj)
-    if (isTRUE(bump_zero)) dend <- bump_zero_heights(dend, eps = eps)
-
-    if (is.null(leaf_group_ids)) {
-      leaf_group_ids <- cutree(hc_obj, k = k)
-    }
-
-    # align to dendrogram labels
-    labs <- labels(dend)
-    if (is.null(names(leaf_group_ids))) {
-      stop("leaf_group_ids must be a named vector with names matching leaf labels")
-    }
-    leaf_group_ids <- leaf_group_ids[labs]
-    if (anyNA(leaf_group_ids)) {
-      missing <- labs[is.na(leaf_group_ids)]
-      stop("leaf_group_ids missing these labels: ", paste(missing[1:min(20, length(missing))], collapse = ", "))
-    }
-
-    ids <- as.integer(leaf_group_ids)
-    id_levels <- sort(unique(ids))
-
-    if (is.null(palette_k)) {
-      palette_k <- setNames(grDevices::hcl.colors(length(id_levels), palette = "Dynamic"), as.character(id_levels))
-    }
-
-    # ensure palette covers all ids
-    if (!all(as.character(id_levels) %in% names(palette_k))) {
-      miss <- setdiff(as.character(id_levels), names(palette_k))
-      stop("palette_k missing IDs: ", paste(miss, collapse = ", "))
-    }
-
-    color_dend_by_membership(dend, leaf_group_ids, palette_k, mixed_col = mixed_col)
-  }
-
 
 
 # metadata for locality annotations (match clustering behaviour)
@@ -1629,7 +1507,7 @@ color_dend_by_membership <- function(dend, membership, palette, mixed_col = "gre
       lgd_main <- ComplexHeatmap::Legend(title = "Abundance", col_fun = col_fun, at = at_vals)
       hm_name <- "Abundance"
     }
-    
+
     ht <- ComplexHeatmap::Heatmap(
       mat_plot,
       name = hm_name,
@@ -1647,7 +1525,7 @@ color_dend_by_membership <- function(dend, membership, palette, mixed_col = "gre
         # For quantitative heatmaps, print abundance values inside each cell.
         if (nm != "pa_jc") {
           v <- mat_plot[cbind(i, j)]  # vector of values aligned to i/j pairs
-          
+
           ok <- !is.na(v) & (v > 0)
           if (any(ok)) {
             lab <- character(length(v))
@@ -1772,4 +1650,3 @@ for (r in CFG$runs$heatmap) {
 }
 
 results
-
